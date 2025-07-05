@@ -3,6 +3,7 @@ import traceback
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+from urllib.parse import urlparse
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from pyspark.sql.utils import AnalysisException
@@ -44,45 +45,73 @@ def read_csv_from_s3(spark, s3_path, sample_only=False):
 # ========================
 # VALIDATE AND ENRICH
 # ========================
-def validate_and_enrich(df, dataset, bad_row_path=None, spark=None):
+
+def validate_and_enrich(df, dataset, bad_row_path, file_path, spark=None, cloudwatch_group=None, cloudwatch_stream=None):
+    """
+    Validate schema, drop nulls, deduplicate, and store bad records.
+    """
     try:
-        REQUIRED_COLUMNS = {
+        required_columns = {
             "order_items": ["order_id", "product_id", "user_id", "sale_price", "created_at", "status"],
-            "products": ["id", "sku", "cost", "category", "name", "brand", "retail_price", "department"]
+            "products": ["id", "sku", "cost", "category", "name"],
+            "orders": ["order_id", "user_id", "created_at", "status", "num_of_item"]
         }
 
-        if dataset not in REQUIRED_COLUMNS:
-            raise ValueError(f"Unknown dataset type: {dataset}")
+        if dataset not in required_columns:
+            raise ValueError(f"Unknown dataset '{dataset}' passed to validation")
 
-        required_cols = set(map(str.lower, REQUIRED_COLUMNS[dataset]))
-        actual_cols = set(map(str.lower, df.columns))
-        missing = list(required_cols - actual_cols)
+        # Normalize column names
+        df = df.select([col(c).alias(c.lower()) for c in df.columns])
+        required_cols = [c.lower() for c in required_columns[dataset]]
+        df_cols = set(df.columns)
 
+        # Schema check
+        missing = list(set(required_cols) - df_cols)
         if missing:
-            raise ValueError(f"Missing required columns for {dataset}: {missing}")
+            raise ValueError(f"Missing columns for dataset '{dataset}': {missing}")
 
-        # Drop rows with nulls in required columns
-        filtered_df = df
-        for col_name in REQUIRED_COLUMNS[dataset]:
-            filtered_df = filtered_df.filter(col(col_name).isNotNull())
+        # Track original record count
+        original_count = df.count()
+        log(f"{dataset}: Original row count: {original_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
 
-        filtered_df = filtered_df.dropDuplicates()
+        # Filter out rows with nulls in required fields
+        not_null_condition = None
+        for c in required_cols:
+            if not_null_condition is None:
+                not_null_condition = col(c).isNotNull()
+            else:
+                not_null_condition = not_null_condition & col(c).isNotNull()
 
-        # Get bad rows
-        bad_rows = df.subtract(filtered_df)
+        valid_df = df.filter(not_null_condition)
+        valid_count = valid_df.count()
+        log(f"{dataset}: Rows after null filtering: {valid_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
 
-        # Write bad rows to audit folder if any
-        if bad_rows and bad_row_path:
-            ts_suffix = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            full_path = f"{bad_row_path.rstrip('/')}/bad_rows_{dataset}_{ts_suffix}.csv"
-            bad_rows.write.mode("overwrite").option("header", True).csv(full_path)
-            log(f"Wrote bad rows to: {full_path}", spark=spark)
+        # Deduplicate
+        dedup_df = valid_df.dropDuplicates()
+        final_count = dedup_df.count()
+        log(f"{dataset}: Rows after deduplication: {final_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
 
-        log(f"Validation passed for '{dataset}' - Valid records: {filtered_df.count()}", spark=spark)
-        return filtered_df
+        # === Handle rejected rows ===
+        rejected_df = df.subtract(dedup_df)
+        rejected_count = rejected_df.count()
+        if rejected_count > 0:
+            log(f"{dataset}: Writing {rejected_count} rejected rows to bad row folder", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
+            
+            # Generate timestamped bad row path
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            parsed_path = urlparse(file_path)
+            filename = parsed_path.path.split("/")[-1].replace(".csv", "")
+            bad_row_s3_path = f"{bad_row_path}/{dataset}/{filename}_badrows_{ts}/"
+
+            rejected_df.write \
+                .option("header", True) \
+                .mode("overwrite") \
+                .csv(bad_row_s3_path)
+
+        return dedup_df
 
     except Exception as e:
-        log(f"Validation failed for {dataset}: {e}", spark=spark)
+        log(f" Error in validation for {dataset}: {str(e)}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
         traceback.print_exc()
         raise
 
