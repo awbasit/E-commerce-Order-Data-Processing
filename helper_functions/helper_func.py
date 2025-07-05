@@ -1,9 +1,13 @@
 import boto3
+import sys
+import os
+import json
 import traceback
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import urlparse
+from decimal import Decimal
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from pyspark.sql.utils import AnalysisException
@@ -45,11 +49,7 @@ def read_csv_from_s3(spark, s3_path, sample_only=False):
 # ========================
 # VALIDATE AND ENRICH
 # ========================
-
 def validate_and_enrich(df, dataset, bad_row_path, file_path, spark=None, cloudwatch_group=None, cloudwatch_stream=None):
-    """
-    Validate schema, drop nulls, deduplicate, and store bad records.
-    """
     try:
         required_columns = {
             "order_items": ["order_id", "product_id", "user_id", "sale_price", "created_at", "status"],
@@ -65,16 +65,14 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, spark=None, cloudw
         required_cols = [c.lower() for c in required_columns[dataset]]
         df_cols = set(df.columns)
 
-        # Schema check
         missing = list(set(required_cols) - df_cols)
         if missing:
             raise ValueError(f"Missing columns for dataset '{dataset}': {missing}")
 
-        # Track original record count
         original_count = df.count()
         log(f"{dataset}: Original row count: {original_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
 
-        # Filter out rows with nulls in required fields
+        # Null filter
         not_null_condition = None
         for c in required_cols:
             if not_null_condition is None:
@@ -86,32 +84,28 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, spark=None, cloudw
         valid_count = valid_df.count()
         log(f"{dataset}: Rows after null filtering: {valid_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
 
-        # Deduplicate
+        # Deduplication
         dedup_df = valid_df.dropDuplicates()
         final_count = dedup_df.count()
         log(f"{dataset}: Rows after deduplication: {final_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
 
-        # === Handle rejected rows ===
+        # Rejected rows
         rejected_df = df.subtract(dedup_df)
         rejected_count = rejected_df.count()
         if rejected_count > 0:
             log(f"{dataset}: Writing {rejected_count} rejected rows to bad row folder", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
-            
-            # Generate timestamped bad row path
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             parsed_path = urlparse(file_path)
             filename = parsed_path.path.split("/")[-1].replace(".csv", "")
             bad_row_s3_path = f"{bad_row_path}/{dataset}/{filename}_badrows_{ts}/"
 
-            rejected_df.write \
-                .option("header", True) \
-                .mode("overwrite") \
-                .csv(bad_row_s3_path)
+            rejected_df.write.option("header", True).mode("overwrite").csv(bad_row_s3_path)
 
         return dedup_df
 
     except Exception as e:
-        log(f" Error in validation for {dataset}: {str(e)}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
+        log(f"Error in validation for {dataset}: {str(e)}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
         traceback.print_exc()
         raise
 
@@ -129,13 +123,11 @@ def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
         logs_client = boto3.client("logs")
         ts_ms = int(datetime.utcnow().timestamp() * 1000)
 
-        # Create log group
         try:
             logs_client.create_log_group(logGroupName=cloudwatch_group)
         except logs_client.exceptions.ResourceAlreadyExistsException:
             pass
 
-        # Create log stream
         try:
             logs_client.create_log_stream(
                 logGroupName=cloudwatch_group,
@@ -144,7 +136,6 @@ def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
         except logs_client.exceptions.ResourceAlreadyExistsException:
             pass
 
-        # Get sequence token
         streams = logs_client.describe_log_streams(
             logGroupName=cloudwatch_group,
             logStreamNamePrefix=cloudwatch_stream,
@@ -193,3 +184,24 @@ def log(message, log_file_path=None, spark=None, cloudwatch_group=None, cloudwat
 
     if cloudwatch_group and cloudwatch_stream:
         log_to_cloudwatch(full_message, cloudwatch_group, cloudwatch_stream)
+
+
+# ========================
+# DYNAMODB WRITER
+# ========================
+def write_to_dynamodb(df, table_name):
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(table_name)
+
+        records = df.toJSON().collect()
+        for record in records:
+            item = json.loads(record, parse_float=Decimal)
+            table.put_item(Item=item)
+
+        log(f"Wrote {len(records)} records to DynamoDB table: {table_name}")
+
+    except Exception as e:
+        log(f"Error writing to DynamoDB {table_name}: {e}")
+        traceback.print_exc()
+        raise
