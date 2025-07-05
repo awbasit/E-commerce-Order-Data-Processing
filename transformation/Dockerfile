@@ -1,29 +1,18 @@
-FROM python:3.11-slim
+# Base Spark image
+FROM apache/spark-py:3.4.1
 
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements
+# Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && \
+    apt-get install -y python3-pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
-COPY . .
+# Copy application code
+COPY transform_task.py /app/
+COPY ../helper_functions /app/helper_functions
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import sys; sys.exit(0)"
-
-CMD ["python", "app.py"]
+# Entry point
+ENTRYPOINT ["python3", "transform_task.py"]
