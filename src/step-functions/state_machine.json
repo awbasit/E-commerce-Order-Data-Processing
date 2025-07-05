@@ -1,0 +1,98 @@
+{
+  "Comment": "E-commerce Data Pipeline - Big Data Processing",
+  "StartAt": "ValidateInput",
+  "States": {
+    "ValidateInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "TaskDefinition": "data-validation-task",
+        "LaunchType": "FARGATE",
+        "PlatformVersion": "1.4.0",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": ["subnet-12345"],
+            "SecurityGroups": ["sg-12345"]
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [{
+            "Name": "validator",
+            "Environment": [
+              {"Name": "S3_BUCKET", "Value.$": "$.s3_bucket"},
+              {"Name": "S3_KEY", "Value.$": "$.s3_key"}
+            ],
+            "Cpu": 2048,  # Scale up for big data
+            "Memory": 8192
+          }]
+        }
+      },
+      "TimeoutSeconds": 3600,  # 1 hour timeout for large files
+      "Retry": [{
+        "ErrorEquals": ["States.TaskFailed"],
+        "IntervalSeconds": 30,
+        "MaxAttempts": 3,
+        "BackoffRate": 2.0
+      }],
+      "Catch": [{
+        "ErrorEquals": ["States.ALL"],
+        "Next": "HandleValidationFailure"
+      }],
+      "Next": "TransformData"
+    },
+    "TransformData": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ProcessCategoryKPIs",
+          "States": {
+            "ProcessCategoryKPIs": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::ecs:runTask.sync",
+              "Parameters": {
+                "TaskDefinition": "kpi-transformation-task",
+                "LaunchType": "FARGATE",
+                "Overrides": {
+                  "ContainerOverrides": [{
+                    "Name": "transformer",
+                    "Environment": [
+                      {"Name": "PROCESSING_TYPE", "Value": "CATEGORY_KPIS"}
+                    ],
+                    "Cpu": 4096,  # More resources for big data
+                    "Memory": 16384
+                  }]
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ProcessDailyKPIs",
+          "States": {
+            "ProcessDailyKPIs": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::ecs:runTask.sync",
+              "Parameters": {
+                "TaskDefinition": "kpi-transformation-task",
+                "LaunchType": "FARGATE",
+                "Overrides": {
+                  "ContainerOverrides": [{
+                    "Name": "transformer",
+                    "Environment": [
+                      {"Name": "PROCESSING_TYPE", "Value": "DAILY_KPIS"}
+                    ],
+                    "Cpu": 4096,
+                    "Memory": 16384
+                  }]
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "ArchiveProcessedFile"
+    }
+  }
+}
