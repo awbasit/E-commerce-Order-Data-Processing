@@ -1,5 +1,4 @@
 import boto3
-import sys
 import os
 import json
 import traceback
@@ -9,87 +8,33 @@ from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
 
-
-
 # ========================
-# READ CSV FROM S3
+# READ CSV FROM S3 (Pandas)
 # ========================
-def read_csv_from_s3(spark, s3_path, sample_only=False):
+def read_csv_from_s3(s3_path, sample_only=False):
     try:
-        df = spark.read.option("header", True).csv(s3_path)
+        s3 = boto3.client("s3")
+        parsed = urlparse(s3_path)
+        bucket = parsed.netloc
+        key = parsed.path.lstrip("/")
+
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        df = pd.read_csv(BytesIO(obj["Body"].read()))
+
         if sample_only:
-            log(f"Sampled 5 rows from: {s3_path}", spark=spark)
-            return df.limit(5)
-        log(f"Loaded full dataset from: {s3_path}", spark=spark)
+            log(f"Sampled 5 rows from: {s3_path}")
+            return df.head(5)
+        
+        log(f"Loaded dataset from: {s3_path}")
         return df
     except Exception as e:
-        log(f"Failed to read CSV from {s3_path}: {e}", spark=spark)
+        log(f"Failed to read CSV from {s3_path}: {e}")
+        traceback.print_exc()
         raise
-
 
 # ========================
 # VALIDATE AND ENRICH
 # ========================
-# def validate_and_enrich(df, dataset, bad_row_path, file_path, spark=None, cloudwatch_group=None, cloudwatch_stream=None):
-#     try:
-#         required_columns = {
-#             "order_items": ["order_id", "product_id", "user_id", "sale_price", "created_at", "status"],
-#             "products": ["id", "sku", "cost", "category", "name"],
-#             "orders": ["order_id", "user_id", "created_at", "status", "num_of_item"]
-#         }
-
-#         if dataset not in required_columns:
-#             raise ValueError(f"Unknown dataset '{dataset}' passed to validation")
-
-#         # Normalize column names
-#         df = df.select([col(c).alias(c.lower()) for c in df.columns])
-#         required_cols = [c.lower() for c in required_columns[dataset]]
-#         df_cols = set(df.columns)
-
-#         missing = list(set(required_cols) - df_cols)
-#         if missing:
-#             raise ValueError(f"Missing columns for dataset '{dataset}': {missing}")
-
-#         original_count = df.count()
-#         log(f"{dataset}: Original row count: {original_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
-
-#         # Null filter
-#         not_null_condition = None
-#         for c in required_cols:
-#             if not_null_condition is None:
-#                 not_null_condition = col(c).isNotNull()
-#             else:
-#                 not_null_condition = not_null_condition & col(c).isNotNull()
-
-#         valid_df = df.filter(not_null_condition)
-#         valid_count = valid_df.count()
-#         log(f"{dataset}: Rows after null filtering: {valid_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
-
-#         # Deduplication
-#         dedup_df = valid_df.dropDuplicates()
-#         final_count = dedup_df.count()
-#         log(f"{dataset}: Rows after deduplication: {final_count}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
-
-#         # Rejected rows
-#         rejected_df = df.subtract(dedup_df)
-#         rejected_count = rejected_df.count()
-#         if rejected_count > 0:
-#             log(f"{dataset}: Writing {rejected_count} rejected rows to bad row folder", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
-
-#             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-#             parsed_path = urlparse(file_path)
-#             filename = parsed_path.path.split("/")[-1].replace(".csv", "")
-#             bad_row_s3_path = f"{bad_row_path}/{dataset}/{filename}_badrows_{ts}/"
-
-#             rejected_df.write.option("header", True).mode("overwrite").csv(bad_row_s3_path)
-
-#         return dedup_df
-
-#     except Exception as e:
-#         log(f"Error in validation for {dataset}: {str(e)}", spark=spark, cloudwatch_group=cloudwatch_group, cloudwatch_stream=cloudwatch_stream)
-#         traceback.print_exc()
-#         raise
-
 def check_referential_integrity(df_main, df_ref, main_key, ref_key, ref_name):
     valid_keys = set(df_ref[ref_key].dropna().unique())
     mask = df_main[main_key].isin(valid_keys)
@@ -99,7 +44,6 @@ def check_referential_integrity(df_main, df_ref, main_key, ref_key, ref_name):
         log(f"Found {len(invalid_rows)} rows in '{main_key}' not found in '{ref_name}.{ref_key}'")
         return df_main[mask], invalid_rows
     return df_main, pd.DataFrame()
-
 
 def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={}):
     required_columns = {
@@ -121,7 +65,6 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
     original_len = len(df)
     df = df.dropna(subset=required_cols)
     after_null_len = len(df)
-
     df = df.drop_duplicates()
     after_dedup_len = len(df)
 
@@ -156,14 +99,12 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
 
     return df
 
-
 # ========================
 # LOGGING UTILITIES
 # ========================
 def log_to_console(message):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] {message}")
-
 
 def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
     try:
@@ -209,42 +150,26 @@ def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
         print(f"CloudWatch logging error: {e}")
         traceback.print_exc()
 
-
-def log_to_s3(message, log_file_path, spark):
-    try:
-        suffix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        file_path = f"{log_file_path.rstrip('/')}/log_{suffix}.txt"
-        df = spark.createDataFrame([(message,)], ["message"])
-        df.coalesce(1).write.mode("append").text(file_path)
-    except Exception as e:
-        print(f"Failed to log to S3: {e}")
-        traceback.print_exc()
-
-
-def log(message, log_file_path=None, spark=None, cloudwatch_group=None, cloudwatch_stream=None):
+def log(message, cloudwatch_group=None, cloudwatch_stream=None):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_message = f"[{ts}] {message}"
     log_to_console(full_message)
 
-    if log_file_path and spark:
-        log_to_s3(full_message, log_file_path, spark)
-
     if cloudwatch_group and cloudwatch_stream:
         log_to_cloudwatch(full_message, cloudwatch_group, cloudwatch_stream)
 
-
 # ========================
-# DYNAMODB WRITER
+# DYNAMODB WRITER (for pandas)
 # ========================
 def write_to_dynamodb(df, table_name):
     try:
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
 
-        records = df.toJSON().collect()
+        records = df.to_dict(orient="records")
         for record in records:
-            item = json.loads(record, parse_float=Decimal)
-            table.put_item(Item=item)
+            cleaned = json.loads(json.dumps(record), parse_float=Decimal)
+            table.put_item(Item=cleaned)
 
         log(f"Wrote {len(records)} records to DynamoDB table: {table_name}")
 
