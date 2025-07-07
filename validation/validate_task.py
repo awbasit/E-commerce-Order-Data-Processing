@@ -1,4 +1,5 @@
 import boto3
+import pandas as pd
 from urllib.parse import urlparse
 from helper_functions.helper_func import read_csv_from_s3, validate_and_enrich, log
 
@@ -57,13 +58,23 @@ def main():
                 log(f"Validating file: {file_path}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
                 df = read_csv_from_s3(file_path)
-                # Dynamically load other datasets for referential checks
+
+                # Build referential data if needed
                 ref_data_paths = {}
+
                 if dataset == "order_items":
-                    ref_data_paths = {
-                        "products": "s3://project6dt/raw_data/products/products.csv",
-                        "orders": "s3://project6dt/raw_data/orders/orders.csv"
-                    }
+                    ref_data_paths["products"] = "s3://project6dt/raw_data/products/products.csv"
+
+                    # Dynamically find and merge all orders_part*.csv
+                    orders_parts = [
+                        f for f in all_csv_files
+                        if f.startswith("s3://project6dt/raw_data/orders/orders_part")
+                    ]
+                    if not orders_parts:
+                        raise FileNotFoundError("No orders_part*.csv found for referential check.")
+
+                    orders_dfs = [read_csv_from_s3(f) for f in orders_parts]
+                    ref_data_paths["orders"] = pd.concat(orders_dfs, ignore_index=True)
 
                 validate_and_enrich(
                     df,
