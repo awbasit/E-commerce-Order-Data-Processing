@@ -56,13 +56,16 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
     if dataset not in required_columns:
         raise ValueError(f"Unknown dataset: {dataset}")
 
+    # Normalize column names
     df.columns = [c.lower() for c in df.columns]
     required_cols = [c.lower() for c in required_columns[dataset]]
 
+    # Check for missing required columns
     missing = set(required_cols) - set(df.columns)
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
+    # Drop nulls and duplicates
     original_len = len(df)
     df = df.dropna(subset=required_cols)
     after_null_len = len(df)
@@ -71,7 +74,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
 
     log(f"{dataset}: Original={original_len}, After Nulls={after_null_len}, After Dedup={after_dedup_len}")
 
-    # Referential integrity checks
+    # Referential Integrity Check (only for order_items)
     rejected_referential = pd.DataFrame()
     if dataset == "order_items":
         if "products" in ref_data_paths:
@@ -93,7 +96,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
             rejected_referential = pd.concat([rejected_referential, bad])
 
     # Save rejected rows
-    if rejected_referential is not None and not rejected_referential.empty:
+    if not rejected_referential.empty:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         parsed = urlparse(bad_row_path)
         filename = os.path.basename(file_path).replace(".csv", "")
@@ -107,8 +110,22 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
         s3.put_object(Bucket=parsed.netloc, Key=rejected_key, Body=buffer)
         log(f"Rejected rows saved to: s3://{parsed.netloc}/{rejected_key}")
 
-    return df
+    # Save validated data to validated_data/<dataset> folder
+    validated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    parsed_input = urlparse(file_path)
+    file_name = os.path.basename(parsed_input.path).replace(".csv", "")
+    output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.csv"
 
+    buffer = BytesIO()
+    df.to_csv(buffer, index=False)
+    buffer.seek(0)
+
+    s3 = boto3.client("s3")
+    s3.put_object(Bucket=parsed_input.netloc, Key=output_key, Body=buffer)
+
+    log(f"Validated data saved to: s3://{parsed_input.netloc}/{output_key}")
+
+    return df
 
 # ========================
 # LOGGING UTILITIES
