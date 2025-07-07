@@ -1,0 +1,25 @@
+{
+  "family": "validator-task",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::025523568662:role/AWS_ECSExecution",
+  "containerDefinitions": [
+    {
+      "name": "validator",
+      "image": "025523568662.dkr.ecr.eu-north-1.amazonaws.com/validator:latest",
+      "essential": true,
+      "command": ["python3", "validate_task.py"],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/validator",
+          "awslogs-region": "eu-north-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
+
