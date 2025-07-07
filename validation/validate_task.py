@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from urllib.parse import urlparse
 import sys
-from helper_functions.helper_func import init_spark, read_csv_from_s3, validate_and_enrich, log
+from helper_functions.helper_func import read_csv_from_s3, validate_and_enrich, log
 
 # === CONFIGURATION ===
 INPUT_PREFIX= "s3://project6dt/raw_data"
