@@ -1,0 +1,163 @@
+{
+  "ECSConfig": {
+    "TaskDefinition": {
+      "family": "big-data-transform-validator-task",
+      "requiresCompatibilities": ["FARGATE"],
+      "cpu": "2048",
+      "memory": "8192",
+      "networkMode": "awsvpc",
+      "containerDefinitions": [
+        {
+          "name": "transformer",
+          "image": "025523568662.dkr.ecr.eu-north-1.amazonaws.com/transformer:latest",
+          "cpu": 1024,
+          "memory": 4096,
+          "essential": true,
+          "logConfiguration": {
+            "logDriver": "awslogs",
+            "options": {
+              "awslogs-group": "/ecs/transformer",
+              "awslogs-region": "eu-north-1",
+              "awslogs-stream-prefix": "ecs"
+            }
+          }
+        },
+        {
+          "name": "validator",
+          "image": "025523568662.dkr.ecr.eu-north-1.amazonaws.com/validator:latest",
+          "cpu": 1024,
+          "memory": 4096,
+          "essential": true,
+          "logConfiguration": {
+            "logDriver": "awslogs",
+            "options": {
+              "awslogs-group": "/ecs/validator",
+              "awslogs-region": "eu-north-1",
+              "awslogs-stream-prefix": "ecs"
+            }
+          }
+        }
+      ]
+    },
+    "AutoScaling": {
+      "TargetTrackingPolicy": {
+        "ServiceNamespace": "ecs",
+        "ResourceId": "service/YOUR-CLUSTER/YOUR-SERVICE",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "MinCapacity": 1,
+        "MaxCapacity": 10,
+        "TargetValue": 60.0,
+        "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+      }
+    }
+  },
+
+  "StepFunctionDefinition": {
+    "StartAt": "ValidateData",
+    "States": {
+      "ValidateData": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::ecs:runTask.sync",
+        "Parameters": {
+          "LaunchType": "FARGATE",
+          "Cluster": "YOUR-CLUSTER-NAME",
+          "TaskDefinition": "big-data-transform-validator-task",
+          "NetworkConfiguration": {
+            "AwsvpcConfiguration": {
+              "Subnets": ["subnet-abc123"],
+              "SecurityGroups": ["sg-abc123"],
+              "AssignPublicIp": "ENABLED"
+            }
+          },
+          "Overrides": {
+            "ContainerOverrides": [
+              {
+                "Name": "validator",
+                "Command": ["python3", "validate_task.py"]
+              }
+            ]
+          }
+        },
+        "Next": "CheckValidationStatus"
+      },
+      "CheckValidationStatus": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.Payload.status",
+            "StringEquals": "SUCCESS",
+            "Next": "TransformData"
+          }
+        ],
+        "Default": "NotifyFailure"
+      },
+      "TransformData": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::ecs:runTask.sync",
+        "Parameters": {
+          "LaunchType": "FARGATE",
+          "Cluster": "YOUR-CLUSTER-NAME",
+          "TaskDefinition": "big-data-transform-validator-task",
+          "NetworkConfiguration": {
+            "AwsvpcConfiguration": {
+              "Subnets": ["subnet-abc123"],
+              "SecurityGroups": ["sg-abc123"],
+              "AssignPublicIp": "ENABLED"
+            }
+          },
+          "Overrides": {
+            "ContainerOverrides": [
+              {
+                "Name": "transformer",
+                "Command": ["python3", "transform_task.py"]
+              }
+            ]
+          }
+        },
+        "Next": "NotifySuccess"
+      },
+      "NotifyFailure": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish",
+        "Parameters": {
+          "TopicArn": "arn:aws:sns:eu-north-1:025523568662:PipelineFailureTopic",
+          "Message": "Validation failed."
+        },
+        "End": true
+      },
+      "NotifySuccess": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish",
+        "Parameters": {
+          "TopicArn": "arn:aws:sns:eu-north-1:025523568662:PipelineSuccessTopic",
+          "Message": "Pipeline completed successfully."
+        },
+        "End": true
+      }
+    }
+  },
+
+  "EventBridgeTrigger": {
+    "Source": ["aws.s3"],
+    "DetailType": ["Object Created"],
+    "Detail": {
+      "bucket": {
+        "name": ["your-data-ingestion-bucket"]
+      }
+    },
+    "Targets": [
+      {
+        "Arn": "arn:aws:states:eu-north-1:025523568662:stateMachine:YourStateMachineName",
+        "RoleArn": "arn:aws:iam::025523568662:role/StepFunctionInvokeRole"
+      }
+    ]
+  },
+
+  "NightlyBatchJob": {
+    "Schedule": "cron(30 23 * * ? *)",
+    "Target": {
+      "Arn": "arn:aws:states:eu-north-1:025523568662:stateMachine:NightlyAggregatorPipeline",
+      "RoleArn": "arn:aws:iam::025523568662:role/StepFunctionInvokeRole"
+    }
+  }
+}
