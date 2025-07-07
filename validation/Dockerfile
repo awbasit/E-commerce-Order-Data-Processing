@@ -1,18 +1,25 @@
-# Base Spark image
-FROM apache/spark-py:3.4.1
+# Base image with Python 3.10 and pip
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 # Set working directory
 WORKDIR /app
 
-# Copy and install Python dependencies
-COPY requirements.txt .
+# Install essential system libraries
 RUN apt-get update && \
-    apt-get install -y python3-pip && \
-    pip install --no-cache-dir -r requirements.txt
+    apt-get install -y gcc curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy app files
-COPY validate_task.py /app/
-COPY ../helper_functions /app/helper_functions
+# Copy requirements and install dependencies
+COPY validation/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Entry point
-ENTRYPOINT ["python3", "validate_task.py"]
+# Copy validation script and helper functions
+COPY validation/validate_task.py .
+COPY helper_functions/ ./helper_functions/
+
+# Default command (can be overridden by ECS or docker run)
+CMD ["python3", "validate_task.py"]
