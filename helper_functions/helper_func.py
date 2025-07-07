@@ -45,6 +45,7 @@ def check_referential_integrity(df_main, df_ref, main_key, ref_key, ref_name):
         return df_main[mask], invalid_rows
     return df_main, pd.DataFrame()
 
+
 def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={}):
     required_columns = {
         "order_items": ["order_id", "product_id", "user_id", "sale_price", "created_at", "status"],
@@ -74,11 +75,20 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
     rejected_referential = pd.DataFrame()
     if dataset == "order_items":
         if "products" in ref_data_paths:
-            df_products = read_csv_from_s3(ref_data_paths["products"])
+            df_products = (
+                read_csv_from_s3(ref_data_paths["products"])
+                if isinstance(ref_data_paths["products"], str)
+                else ref_data_paths["products"]
+            )
             df, bad = check_referential_integrity(df, df_products, "product_id", "id", "products")
             rejected_referential = pd.concat([rejected_referential, bad])
+
         if "orders" in ref_data_paths:
-            df_orders = read_csv_from_s3(ref_data_paths["orders"])
+            df_orders = (
+                read_csv_from_s3(ref_data_paths["orders"])
+                if isinstance(ref_data_paths["orders"], str)
+                else ref_data_paths["orders"]
+            )
             df, bad = check_referential_integrity(df, df_orders, "order_id", "order_id", "orders")
             rejected_referential = pd.concat([rejected_referential, bad])
 
@@ -98,6 +108,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
         log(f"Rejected rows saved to: s3://{parsed.netloc}/{rejected_key}")
 
     return df
+
 
 # ========================
 # LOGGING UTILITIES
