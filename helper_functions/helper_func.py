@@ -7,8 +7,6 @@ from io import BytesIO
 from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
-from deltalake import DeltaTable
-from deltalake.writer import write_deltalake
 
 # ========================
 # READ CSV FROM S3 (Pandas)
@@ -97,7 +95,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
             df, bad = check_referential_integrity(df, df_orders, "order_id", "order_id", "orders")
             rejected_referential = pd.concat([rejected_referential, bad])
 
-    # Save rejected rows to S3 as CSV (still as fallback)
+    # Save rejected rows
     if not rejected_referential.empty:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         parsed = urlparse(bad_row_path)
@@ -112,18 +110,22 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
         s3.put_object(Bucket=parsed.netloc, Key=rejected_key, Body=buffer)
         log(f"Rejected rows saved to: s3://{parsed.netloc}/{rejected_key}")
 
-    # === Save VALIDATED data to Delta Lake ===
+    # Save validated data to validated_data/<dataset> folder
     validated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     parsed_input = urlparse(file_path)
     file_name = os.path.basename(parsed_input.path).replace(".csv", "")
-    delta_path = f"s3://project6dt/validated_data_delta/{dataset}/{file_name}_validated_{validated_ts}"
+    output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.csv"
 
-    write_deltalake(delta_path, df, mode="overwrite")
+    buffer = BytesIO()
+    df.to_csv(buffer, index=False)
+    buffer.seek(0)
 
-    log(f"Validated data saved to Delta table at: {delta_path}")
+    s3 = boto3.client("s3")
+    s3.put_object(Bucket=parsed_input.netloc, Key=output_key, Body=buffer)
+
+    log(f"Validated data saved to: s3://{parsed_input.netloc}/{output_key}")
 
     return df
-
 
 # ========================
 # LOGGING UTILITIES
