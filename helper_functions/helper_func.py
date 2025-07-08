@@ -7,24 +7,15 @@ from io import BytesIO
 from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
+from pyspark.sql import SparkSession
 from botocore.exceptions import ClientError
 
-# Conditional Spark imports
-try:
-    from pyspark.sql import SparkSession
-    SPARK_AVAILABLE = True
-except ImportError:
-    SPARK_AVAILABLE = False
-    SparkSession = None
 
 # ========================
 # SPARK INITIALIZATION
 # ========================
 
 def init_spark(app_name):
-    if not SPARK_AVAILABLE:
-        raise ImportError("PySpark is not available. Install pyspark to use Spark functionality.")
-    
     spark = SparkSession.builder \
         .appName(app_name) \
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
@@ -181,22 +172,20 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
         s3.put_object(Bucket=parsed.netloc, Key=rejected_key, Body=buffer)
         log(f"Rejected rows saved to: s3://{parsed.netloc}/{rejected_key}")
 
-    # Save validated data to validated_data/<dataset> folder using pandas
+    # Save validated data to validated_data/<dataset> folder
     validated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     parsed_input = urlparse(file_path)
     file_name = os.path.basename(parsed_input.path).replace(".csv", "")
-    output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.parquet"
+    output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.csv"
 
-    # Write parquet file directly to S3 using pandas
     buffer = BytesIO()
-    df.to_parquet(buffer, index=False, engine='pyarrow')
+    df.to_csv(buffer, index=False)
     buffer.seek(0)
 
     s3 = boto3.client("s3")
     s3.put_object(Bucket=parsed_input.netloc, Key=output_key, Body=buffer)
 
-    output_path = f"s3://{parsed_input.netloc}/{output_key}"
-    log(f"Validated data saved to: {output_path}")
+    log(f"Validated data saved to: s3://{parsed_input.netloc}/{output_key}")
 
     return df
 
@@ -260,24 +249,16 @@ def log(message, cloudwatch_group=None, cloudwatch_stream=None):
         log_to_cloudwatch(full_message, cloudwatch_group, cloudwatch_stream)
 
 # ========================
-# DYNAMODB WRITER (supports both pandas and Spark DataFrames)
+# DYNAMODB WRITER (for pandas)
 # ========================
 def write_to_dynamodb(df, table_name):
     try:
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
 
-        # Check if it's a Spark DataFrame or pandas DataFrame
-        if SPARK_AVAILABLE and hasattr(df, 'toPandas'):
-            # It's a Spark DataFrame, convert to pandas
-            records = df.toPandas().to_dict(orient="records")
-        else:
-            # It's a pandas DataFrame
-            records = df.to_dict(orient="records")
-
+        records = df.to_dict(orient="records")
         for record in records:
-            # Clean the record for DynamoDB
-            cleaned = json.loads(json.dumps(record, default=str), parse_float=Decimal)
+            cleaned = json.loads(json.dumps(record), parse_float=Decimal)
             table.put_item(Item=cleaned)
 
         log(f"Wrote {len(records)} records to DynamoDB table: {table_name}")
