@@ -256,8 +256,10 @@ def write_to_dynamodb(df, table_name):
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
 
-        records = df.to_dict(orient="records")
+        # Convert PySpark rows to Python dicts
+        records = [row.asDict() for row in df.collect()]
         for record in records:
+            # Convert floats to Decimals for DynamoDB compatibility
             cleaned = json.loads(json.dumps(record), parse_float=Decimal)
             table.put_item(Item=cleaned)
 
