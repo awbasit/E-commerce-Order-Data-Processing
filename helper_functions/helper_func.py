@@ -4,6 +4,7 @@ import json
 import traceback
 import pandas as pd
 from io import BytesIO
+import datetime
 from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
@@ -252,15 +253,19 @@ def log(message, cloudwatch_group=None, cloudwatch_stream=None):
 # DYNAMODB WRITER (for pandas)
 # ========================
 def write_to_dynamodb(df, table_name):
+    class DynamoDBJSONEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, (datetime.date, datetime.datetime)):
+                return obj.isoformat()
+            return super().default(obj)
+
     try:
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
 
-        # Convert PySpark rows to Python dicts
         records = [row.asDict() for row in df.collect()]
         for record in records:
-            # Convert floats to Decimals for DynamoDB compatibility
-            cleaned = json.loads(json.dumps(record), parse_float=Decimal)
+            cleaned = json.loads(json.dumps(record, cls=DynamoDBJSONEncoder), parse_float=Decimal)
             table.put_item(Item=cleaned)
 
         log(f"Wrote {len(records)} records to DynamoDB table: {table_name}")
