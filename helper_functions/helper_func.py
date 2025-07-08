@@ -5,7 +5,6 @@ import traceback
 import pandas as pd
 from io import BytesIO
 import datetime
-from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
 from pyspark.sql import SparkSession
@@ -160,7 +159,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
 
     # Save rejected rows
     if not rejected_referential.empty:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.datetime.now() .strftime("%Y%m%d_%H%M%S")
         parsed = urlparse(bad_row_path)
         filename = os.path.basename(file_path).replace(".csv", "")
         rejected_key = f"{parsed.path.strip('/')}/{dataset}/{filename}_badrows_{ts}.csv"
@@ -174,7 +173,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
         log(f"Rejected rows saved to: s3://{parsed.netloc}/{rejected_key}")
 
     # Save validated data to validated_data/<dataset> folder
-    validated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    validated_ts = datetime.datetime.now() .strftime("%Y%m%d_%H%M%S")
     parsed_input = urlparse(file_path)
     file_name = os.path.basename(parsed_input.path).replace(".csv", "")
     output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.csv"
@@ -194,7 +193,7 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
 # LOGGING UTILITIES
 # ========================
 def log_to_console(message):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.datetime.now() .strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] {message}")
 
 def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
@@ -242,7 +241,7 @@ def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
         traceback.print_exc()
 
 def log(message, cloudwatch_group=None, cloudwatch_stream=None):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.datetime.now() .strftime("%Y-%m-%d %H:%M:%S")
     full_message = f"[{ts}] {message}"
     log_to_console(full_message)
 
@@ -257,7 +256,7 @@ def write_to_dynamodb(df, table_name):
         for k, v in record.items():
             if isinstance(v, (datetime.date, datetime.datetime)):
                 record[k] = v.isoformat()
-            elif isinstance(v, float):  # Convert floats to Decimal for DynamoDB
+            elif isinstance(v, float):
                 record[k] = Decimal(str(v))
         return record
 
