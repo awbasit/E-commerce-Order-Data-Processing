@@ -1,7 +1,6 @@
 import sys
 import traceback
 from datetime import datetime
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date, countDistinct, count, sum as _sum, avg, when
 from helper_functions.helper_func import init_spark, log, write_to_dynamodb, create_table_if_not_exists
 
@@ -13,6 +12,7 @@ CLOUDWATCH_STREAM = "transformation-stream"
 CATEGORY_KPI_TABLE = "CategoryKPI"
 ORDER_KPI_TABLE = "OrderKPI"
 
+
 def compute_category_kpis(df):
     return df.withColumn("order_date", to_date(col("order_created_at"))) \
         .groupBy("category", "order_date") \
@@ -22,16 +22,18 @@ def compute_category_kpis(df):
             (count(when(col("status") == "returned", True)) / count("*") * 100).alias("avg_return_rate")
         )
 
+
 def compute_order_kpis(df):
     return df.withColumn("order_date", to_date(col("order_created_at"))) \
         .groupBy("order_date") \
         .agg(
-            countDistinct("order_id").alias("total_orders"),
+            countDistinct("oi_order_id").alias("total_orders"),
             _sum("sale_price").alias("total_revenue"),
             count("*").alias("total_items_sold"),
             (count(when(col("status") == "returned", True)) / count("*") * 100).alias("return_rate"),
-            countDistinct("user_id").alias("unique_customers")
+            countDistinct("order_user_id").alias("unique_customers")
         )
+
 
 def run_transformation():
     spark = None
@@ -50,10 +52,7 @@ def run_transformation():
                 {'AttributeName': 'category', 'AttributeType': 'S'},
                 {'AttributeName': 'order_date', 'AttributeType': 'S'}
             ],
-            throughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
+            throughput={'ReadCapacityUnits': 5, 'WriteCapacityUnits': 5}
         )
 
         create_table_if_not_exists(
@@ -64,33 +63,31 @@ def run_transformation():
             attribute_definitions=[
                 {'AttributeName': 'order_date', 'AttributeType': 'S'}
             ],
-            throughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
+            throughput={'ReadCapacityUnits': 5, 'WriteCapacityUnits': 5}
         )
 
         log("Transformer Job Started", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
-        # === Load datasets ===
+        # === Load datasets with column aliases ===
         order_items_path = f"{VALIDATED_S3_BASE_PATH}/order_items/"
         products_path = f"{VALIDATED_S3_BASE_PATH}/products/"
         orders_path = f"{VALIDATED_S3_BASE_PATH}/orders/"
 
-        df_order_items = spark.read.csv(order_items_path, header=True, inferSchema=True)
-        df_products = spark.read.csv(products_path, header=True, inferSchema=True)
+        df_order_items = spark.read.csv(order_items_path, header=True, inferSchema=True) \
+            .selectExpr("order_id as oi_order_id", "product_id as oi_product_id", "user_id as oi_user_id", "sale_price", "status")
 
-        # Rename created_at to avoid ambiguity
+        df_products = spark.read.csv(products_path, header=True, inferSchema=True) \
+            .selectExpr("id as product_id", "category")
+
         df_orders = spark.read.csv(orders_path, header=True, inferSchema=True) \
-            .selectExpr("order_id", "created_at as order_created_at", "user_id")
+            .selectExpr("order_id as order_id", "created_at as order_created_at", "user_id as order_user_id")
 
         log("Loaded validated datasets", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
         # === Enrich order_items ===
         df_enriched = df_order_items \
-            .join(df_products.select("id", "category"), df_order_items["product_id"] == df_products["id"], "inner") \
-            .join(df_orders, "order_id", "inner") \
-            .drop(df_products["id"])  # Remove duplicate product id
+            .join(df_products, df_order_items["oi_product_id"] == df_products["product_id"], "inner") \
+            .join(df_orders, df_order_items["oi_order_id"] == df_orders["order_id"], "inner")
 
         log(f"Enriched data row count: {df_enriched.count()}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
