@@ -9,6 +9,42 @@ from urllib.parse import urlparse
 from decimal import Decimal
 from botocore.exceptions import ClientError
 
+# Conditional Spark imports
+try:
+    from pyspark.sql import SparkSession
+    SPARK_AVAILABLE = True
+except ImportError:
+    SPARK_AVAILABLE = False
+    SparkSession = None
+
+# ========================
+# SPARK INITIALIZATION
+# ========================
+
+def init_spark(app_name):
+    if not SPARK_AVAILABLE:
+        raise ImportError("PySpark is not available. Install pyspark to use Spark functionality.")
+    
+    spark = SparkSession.builder \
+        .appName(app_name) \
+        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+        .config("spark.sql.adaptive.enabled", "true") \
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+        .config("spark.sql.shuffle.partitions", "200") \
+        .config("spark.sql.autoBroadcastJoinThreshold", 104857600) \
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain") \
+        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com") \
+        .getOrCreate()
+
+    print("=" * 50)
+    print(f"Spark Version: {spark.version}")
+    print(f"Spark App Name: {spark.sparkContext.appName}")
+    print(f"Spark App ID: {spark.sparkContext.applicationId}")
+    print("=" * 50)
+
+    return spark
 
 # ========================
 # READ CSV FROM S3 (Pandas)
@@ -224,16 +260,24 @@ def log(message, cloudwatch_group=None, cloudwatch_stream=None):
         log_to_cloudwatch(full_message, cloudwatch_group, cloudwatch_stream)
 
 # ========================
-# DYNAMODB WRITER (for pandas)
+# DYNAMODB WRITER (supports both pandas and Spark DataFrames)
 # ========================
 def write_to_dynamodb(df, table_name):
     try:
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
 
-        records = df.to_dict(orient="records")
+        # Check if it's a Spark DataFrame or pandas DataFrame
+        if SPARK_AVAILABLE and hasattr(df, 'toPandas'):
+            # It's a Spark DataFrame, convert to pandas
+            records = df.toPandas().to_dict(orient="records")
+        else:
+            # It's a pandas DataFrame
+            records = df.to_dict(orient="records")
+
         for record in records:
-            cleaned = json.loads(json.dumps(record), parse_float=Decimal)
+            # Clean the record for DynamoDB
+            cleaned = json.loads(json.dumps(record, default=str), parse_float=Decimal)
             table.put_item(Item=cleaned)
 
         log(f"Wrote {len(records)} records to DynamoDB table: {table_name}")
