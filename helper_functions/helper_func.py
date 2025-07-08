@@ -199,7 +199,7 @@ def log_to_console(message):
 def log_to_cloudwatch(message, cloudwatch_group, cloudwatch_stream):
     try:
         logs_client = boto3.client("logs")
-        ts_ms = int(datetime.utcnow().timestamp() * 1000)
+        ts_ms = int(datetime.datetime.utcnow().timestamp() * 1000)
 
         try:
             logs_client.create_log_group(logGroupName=cloudwatch_group)
