@@ -253,11 +253,13 @@ def log(message, cloudwatch_group=None, cloudwatch_stream=None):
 # DYNAMODB WRITER (for pandas)
 # ========================
 def write_to_dynamodb(df, table_name):
-    class DynamoDBJSONEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, (datetime.date, datetime.datetime)):
-                return obj.isoformat()
-            return super().default(obj)
+    def convert_types(record):
+        for k, v in record.items():
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                record[k] = v.isoformat()
+            elif isinstance(v, float):  # Convert floats to Decimal for DynamoDB
+                record[k] = Decimal(str(v))
+        return record
 
     try:
         dynamodb = boto3.resource("dynamodb")
@@ -265,7 +267,7 @@ def write_to_dynamodb(df, table_name):
 
         records = [row.asDict() for row in df.collect()]
         for record in records:
-            cleaned = json.loads(json.dumps(record, cls=DynamoDBJSONEncoder), parse_float=Decimal)
+            cleaned = convert_types(record)
             table.put_item(Item=cleaned)
 
         log(f"Wrote {len(records)} records to DynamoDB table: {table_name}")
