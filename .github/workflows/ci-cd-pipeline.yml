@@ -60,21 +60,7 @@ jobs:
 
     - name: Update ECS Services
       run: |
-        aws ecs update-service --cluster your-cluster-name \
+        aws ecs update-service --cluster validator_cluster \
           --service validator-service --force-new-deployment
-        aws ecs update-service --cluster your-cluster-name \
+        aws ecs update-service --cluster transformer_cluster \
           --service transformer-service --force-new-deployment
-
-    - name: Trigger Step Function Execution
-      run: |
-        aws stepfunctions start-execution \
-          --state-machine-arn arn:aws:states:${{ env.AWS_REGION }}:${{ env.ACCOUNT_ID }}:stateMachine:YourStepFunctionName \
-          --input '{"triggerType": "GitHubDeploy"}'
-
-    - name: Notify via SNS (optional)
-      if: always()
-      run: |
-        aws sns publish \
-          --topic-arn arn:aws:sns:${{ env.AWS_REGION }}:${{ env.ACCOUNT_ID }}:DeployPipelineTopic \
-          --message "Validator and Transformer images deployed from GitHub Actions with tag ${{ env.TAG }}" \
-          --subject "Big Data Pipeline Deployed"
