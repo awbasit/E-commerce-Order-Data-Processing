@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date, countDistinct, count, sum as _sum, avg, when
-from helper_functions.helper_func import init_spark, log, write_to_dynamodb
+from helper_functions.helper_func import init_spark, log, write_to_dynamodb, create_table_if_not_exists
 
 # === CONFIGURATION ===
 VALIDATED_S3_BASE_PATH = "s3://project6dt/validated_data"
@@ -37,6 +37,39 @@ def run_transformation():
     spark = None
     try:
         spark = init_spark("Glue-Transformer")
+
+        # === Ensure DynamoDB tables exist ===
+        log("Ensuring DynamoDB tables exist", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
+        create_table_if_not_exists(
+            CATEGORY_KPI_TABLE,
+            key_schema=[
+                {'AttributeName': 'category', 'KeyType': 'HASH'},
+                {'AttributeName': 'order_date', 'KeyType': 'RANGE'}
+            ],
+            attribute_definitions=[
+                {'AttributeName': 'category', 'AttributeType': 'S'},
+                {'AttributeName': 'order_date', 'AttributeType': 'S'}
+            ],
+            throughput={
+                'ReadCapacityUnits': 5,
+                'WriteCapacityUnits': 5
+            }
+        )
+
+        create_table_if_not_exists(
+            ORDER_KPI_TABLE,
+            key_schema=[
+                {'AttributeName': 'order_date', 'KeyType': 'HASH'}
+            ],
+            attribute_definitions=[
+                {'AttributeName': 'order_date', 'AttributeType': 'S'}
+            ],
+            throughput={
+                'ReadCapacityUnits': 5,
+                'WriteCapacityUnits': 5
+            }
+        )
+
 
         log("Transformer Job Started", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
@@ -74,7 +107,7 @@ def run_transformation():
             cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
     except Exception as e:
-        log(f"ERROR during transformation: {e}", log_file_path=LOG_PATH,
+        log(f"ERROR during transformation: {e}", LOG_PATH,
             cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
         traceback.print_exc()
         raise
