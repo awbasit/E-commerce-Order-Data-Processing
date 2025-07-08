@@ -6,8 +6,8 @@ from pyspark.sql.functions import col, to_date, countDistinct, count, sum as _su
 from helper_functions.helper_func import init_spark, log, write_to_dynamodb, create_table_if_not_exists
 
 # === CONFIGURATION ===
-VALIDATED_S3_BASE_PATH = "s3://project6dt/validated_data"
-LOG_PATH = "s3://project6dt/logs/transformation"
+VALIDATED_S3_BASE_PATH = "s3a://project6dt/validated_data"
+LOG_PATH = "s3a://project6dt/logs/transformation"
 CLOUDWATCH_GROUP = "ecommerce-pipeline-log-group"
 CLOUDWATCH_STREAM = "transformation-stream"
 CATEGORY_KPI_TABLE = "CategoryKPI"
@@ -107,7 +107,7 @@ def run_transformation():
             cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
     except Exception as e:
-        log(f"ERROR during transformation: {e}", LOG_PATH,
+        log(f"ERROR during transformation: {e}",
             cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
         traceback.print_exc()
         raise
