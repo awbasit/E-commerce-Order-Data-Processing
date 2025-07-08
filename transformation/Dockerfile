@@ -14,6 +14,11 @@ RUN apt-get clean && \
     apt-get install -y python3-pip && \
     pip install --no-cache-dir -r requirements.txt && \
     rm -rf /var/lib/apt/lists/*
+    
+# Install Hadoop AWS and AWS SDK dependencies
+RUN mkdir -p /opt/bitnami/spark/jars && \
+    curl -o /opt/bitnami/spark/jars/hadoop-aws-3.3.1.jar https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.1/hadoop-aws-3.3.1.jar && \
+    curl -o /opt/bitnami/spark/jars/aws-java-sdk-bundle-1.11.901.jar https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.901/aws-java-sdk-bundle-1.11.901.jar
 
 # Copy application code
 COPY transformation/transform_task.py /app/
