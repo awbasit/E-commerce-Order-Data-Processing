@@ -8,6 +8,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
 from pyspark.sql import SparkSession
+from botocore.exceptions import ClientError
 
 
 # ========================
@@ -73,6 +74,39 @@ def check_referential_integrity(df_main, df_ref, main_key, ref_key, ref_name):
         return df_main[mask], invalid_rows
     return df_main, pd.DataFrame()
 
+
+# ========================
+# DYNAMODB TABLE CREATION
+# ========================
+
+def create_table_if_not_exists(table_name, key_schema, attribute_definitions, throughput):
+    dynamodb = boto3.client("dynamodb")
+
+    try:
+        dynamodb.describe_table(TableName=table_name)
+        print(f"Table '{table_name}' already exists.")
+    except dynamodb.exceptions.ResourceNotFoundException:
+        print(f"Creating DynamoDB table '{table_name}'...")
+
+        try:
+            dynamodb.create_table(
+                TableName=table_name,
+                KeySchema=key_schema,
+                AttributeDefinitions=attribute_definitions,
+                ProvisionedThroughput=throughput
+            )
+
+            waiter = dynamodb.get_waiter('table_exists')
+            waiter.wait(TableName=table_name)
+            print(f"Table '{table_name}' created and ready.")
+
+        except ClientError as e:
+            print(f"Failed to create table '{table_name}': {e}")
+            raise
+
+# ========================
+# VALIDATE AND ENRICH DATA
+# ========================
 
 def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={}):
     required_columns = {
