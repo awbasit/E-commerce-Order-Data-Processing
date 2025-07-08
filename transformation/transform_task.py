@@ -78,9 +78,9 @@ def run_transformation():
         products_path = f"{VALIDATED_S3_BASE_PATH}/products/"
         orders_path = f"{VALIDATED_S3_BASE_PATH}/orders/"
 
-        df_order_items = spark.read.parquet(order_items_path)
-        df_products = spark.read.parquet(products_path)
-        df_orders = spark.read.parquet(orders_path)
+        df_order_items = spark.read.csv(order_items_path, header=True, inferSchema=True)
+        df_products = spark.read.csv(products_path, header=True, inferSchema=True)
+        df_orders = spark.read.csv(orders_path, header=True, inferSchema=True)
 
         log("Loaded validated datasets", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
