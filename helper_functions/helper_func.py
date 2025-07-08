@@ -7,35 +7,8 @@ from io import BytesIO
 from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
-from pyspark.sql import SparkSession
 from botocore.exceptions import ClientError
 
-
-# ========================
-# SPARK INITIALIZATION
-# ========================
-
-def init_spark(app_name):
-    spark = SparkSession.builder \
-        .appName(app_name) \
-        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-        .config("spark.sql.adaptive.enabled", "true") \
-        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-        .config("spark.sql.shuffle.partitions", "200") \
-        .config("spark.sql.autoBroadcastJoinThreshold", 104857600) \
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain") \
-        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-        .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com") \
-        .getOrCreate()
-
-    print("=" * 50)
-    print(f"Spark Version: {spark.version}")
-    print(f"Spark App Name: {spark.sparkContext.appName}")
-    print(f"Spark App ID: {spark.sparkContext.applicationId}")
-    print("=" * 50)
-
-    return spark
 
 # ========================
 # READ CSV FROM S3 (Pandas)
@@ -172,22 +145,21 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
         s3.put_object(Bucket=parsed.netloc, Key=rejected_key, Body=buffer)
         log(f"Rejected rows saved to: s3://{parsed.netloc}/{rejected_key}")
 
-    # Save validated data to validated_data/<dataset> folder
+    # Save validated data to validated_data/<dataset> folder using pandas
     validated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     parsed_input = urlparse(file_path)
     file_name = os.path.basename(parsed_input.path).replace(".csv", "")
     output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.parquet"
 
-    # Create Spark DataFrame
-    spark = SparkSession.builder.getOrCreate()
-    spark_df = spark.createDataFrame(df)
+    # Write parquet file directly to S3 using pandas
+    buffer = BytesIO()
+    df.to_parquet(buffer, index=False, engine='pyarrow')
+    buffer.seek(0)
 
-    # Construct the full output S3 path
-    output_path = f"s3a://{parsed_input.netloc}/{output_key}"
+    s3 = boto3.client("s3")
+    s3.put_object(Bucket=parsed_input.netloc, Key=output_key, Body=buffer)
 
-    # Save to S3 in Parquet format
-    spark_df.write.mode("overwrite").parquet(output_path)
-
+    output_path = f"s3://{parsed_input.netloc}/{output_key}"
     log(f"Validated data saved to: {output_path}")
 
     return df
