@@ -176,16 +176,19 @@ def validate_and_enrich(df, dataset, bad_row_path, file_path, ref_data_paths={})
     validated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     parsed_input = urlparse(file_path)
     file_name = os.path.basename(parsed_input.path).replace(".csv", "")
-    output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.csv"
+    output_key = f"validated_data/{dataset}/{file_name}_validated_{validated_ts}.parquet"
 
-    buffer = BytesIO()
-    df.to_csv(buffer, index=False)
-    buffer.seek(0)
+    # Create Spark DataFrame
+    spark = SparkSession.builder.getOrCreate()
+    spark_df = spark.createDataFrame(df)
 
-    s3 = boto3.client("s3")
-    s3.put_object(Bucket=parsed_input.netloc, Key=output_key, Body=buffer)
+    # Construct the full output S3 path
+    output_path = f"s3a://{parsed_input.netloc}/{output_key}"
 
-    log(f"Validated data saved to: s3://{parsed_input.netloc}/{output_key}")
+    # Save to S3 in Parquet format
+    spark_df.write.mode("overwrite").parquet(output_path)
+
+    log(f"Validated data saved to: {output_path}")
 
     return df
 
