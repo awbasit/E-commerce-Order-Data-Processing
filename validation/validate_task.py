@@ -45,27 +45,17 @@ def main():
     try:
         all_csv_files = list_csv_files(INPUT_PREFIX)
         if not all_csv_files:
-            log("No CSV files found in input directory", 
-                cloudwatch_group=CLOUDWATCH_GROUP, 
-                cloudwatch_stream=CLOUDWATCH_STREAM)
+            log("No CSV files found in input directory", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
             return
-
-        log(f"Found {len(all_csv_files)} CSV files to process", 
-            cloudwatch_group=CLOUDWATCH_GROUP, 
-            cloudwatch_stream=CLOUDWATCH_STREAM)
 
         for file_path in all_csv_files:
             dataset = infer_dataset_from_path(file_path)
             if not dataset:
-                log(f"Skipping file (couldn't infer dataset): {file_path}", 
-                    cloudwatch_group=CLOUDWATCH_GROUP, 
-                    cloudwatch_stream=CLOUDWATCH_STREAM)
+                log(f"Skipping file (couldn't infer dataset): {file_path}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
                 continue
 
             try:
-                log(f"Validating file: {file_path}", 
-                    cloudwatch_group=CLOUDWATCH_GROUP, 
-                    cloudwatch_stream=CLOUDWATCH_STREAM)
+                log(f"Validating file: {file_path}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
                 df = read_csv_from_s3(file_path)
 
@@ -83,19 +73,8 @@ def main():
                     if not orders_parts:
                         raise FileNotFoundError("No orders_part*.csv found for referential check.")
 
-                    log(f"Loading {len(orders_parts)} orders files for referential integrity check", 
-                        cloudwatch_group=CLOUDWATCH_GROUP, 
-                        cloudwatch_stream=CLOUDWATCH_STREAM)
-                    
-                    orders_dfs = []
-                    for orders_file in orders_parts:
-                        orders_df = read_csv_from_s3(orders_file)
-                        orders_dfs.append(orders_df)
-                    
+                    orders_dfs = [read_csv_from_s3(f) for f in orders_parts]
                     ref_data_paths["orders"] = pd.concat(orders_dfs, ignore_index=True)
-                    log(f"Combined orders data: {len(ref_data_paths['orders'])} total rows", 
-                        cloudwatch_group=CLOUDWATCH_GROUP, 
-                        cloudwatch_stream=CLOUDWATCH_STREAM)
 
                 validate_and_enrich(
                     df,
@@ -105,26 +84,13 @@ def main():
                     ref_data_paths=ref_data_paths
                 )
 
-                log(f" Validation passed for: {file_path}", 
-                    cloudwatch_group=CLOUDWATCH_GROUP, 
-                    cloudwatch_stream=CLOUDWATCH_STREAM)
+                log(f"Validation passed for: {file_path}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
             except Exception as e:
-                log(f" Validation failed for {file_path}: {e}", 
-                    cloudwatch_group=CLOUDWATCH_GROUP, 
-                    cloudwatch_stream=CLOUDWATCH_STREAM)
-                # Continue processing other files even if one fails
-                continue
-
-        log(" Validation job completed", 
-            cloudwatch_group=CLOUDWATCH_GROUP, 
-            cloudwatch_stream=CLOUDWATCH_STREAM)
+                log(f"Validation failed for {file_path}: {e}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
     except Exception as e:
-        log(f" Entire validation job failed: {e}", 
-            cloudwatch_group=CLOUDWATCH_GROUP, 
-            cloudwatch_stream=CLOUDWATCH_STREAM)
-        raise
+        log(f"Entire validation job failed: {e}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
 if __name__ == "__main__":
     main()
