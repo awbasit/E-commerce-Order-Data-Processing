@@ -7,6 +7,30 @@ from io import BytesIO
 from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
+from pyspark.sql import SparkSession
+
+
+# ========================
+# SPARK INITIALIZATION
+# ========================
+
+def init_spark(app_name):
+    spark = SparkSession.builder \
+        .appName(app_name) \
+        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+        .config("spark.sql.adaptive.enabled", "true") \
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+        .config("spark.sql.shuffle.partitions", "200") \
+        .config("spark.sql.autoBroadcastJoinThreshold", 104857600) \
+        .getOrCreate()
+
+    print("=" * 50)
+    print(f"Spark Version: {spark.version}")
+    print(f"Spark App Name: {spark.sparkContext.appName}")
+    print(f"Spark App ID: {spark.sparkContext.applicationId}")
+    print("=" * 50)
+
+    return spark
 
 # ========================
 # READ CSV FROM S3 (Pandas)
