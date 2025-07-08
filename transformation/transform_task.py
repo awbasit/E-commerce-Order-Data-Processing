@@ -14,7 +14,7 @@ CATEGORY_KPI_TABLE = "CategoryKPI"
 ORDER_KPI_TABLE = "OrderKPI"
 
 def compute_category_kpis(df):
-    return df.withColumn("order_date", to_date(col("created_at"))) \
+    return df.withColumn("order_date", to_date(col("order_created_at"))) \
         .groupBy("category", "order_date") \
         .agg(
             _sum("sale_price").alias("daily_revenue"),
@@ -23,7 +23,7 @@ def compute_category_kpis(df):
         )
 
 def compute_order_kpis(df):
-    return df.withColumn("order_date", to_date(col("created_at"))) \
+    return df.withColumn("order_date", to_date(col("order_created_at"))) \
         .groupBy("order_date") \
         .agg(
             countDistinct("order_id").alias("total_orders"),
@@ -70,7 +70,6 @@ def run_transformation():
             }
         )
 
-
         log("Transformer Job Started", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
         # === Load datasets ===
@@ -80,14 +79,17 @@ def run_transformation():
 
         df_order_items = spark.read.csv(order_items_path, header=True, inferSchema=True)
         df_products = spark.read.csv(products_path, header=True, inferSchema=True)
-        df_orders = spark.read.csv(orders_path, header=True, inferSchema=True)
+
+        # Rename created_at to avoid ambiguity
+        df_orders = spark.read.csv(orders_path, header=True, inferSchema=True) \
+            .selectExpr("order_id", "created_at as order_created_at", "user_id")
 
         log("Loaded validated datasets", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
 
         # === Enrich order_items ===
         df_enriched = df_order_items \
             .join(df_products.select("id", "category"), df_order_items["product_id"] == df_products["id"], "inner") \
-            .join(df_orders.select("order_id", "created_at", "user_id"), "order_id", "inner") \
+            .join(df_orders, "order_id", "inner") \
             .drop(df_products["id"])  # Remove duplicate product id
 
         log(f"Enriched data row count: {df_enriched.count()}", cloudwatch_group=CLOUDWATCH_GROUP, cloudwatch_stream=CLOUDWATCH_STREAM)
