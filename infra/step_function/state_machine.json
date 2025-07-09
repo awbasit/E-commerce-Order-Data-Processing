@@ -1,0 +1,225 @@
+{
+  "Comment": "Improved Step Function with batch-controlled cleanup",
+  "StartAt": "RunValidation",
+  "States": {
+    "RunValidation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${VALIDATOR_CLUSTER}",
+        "TaskDefinition": "${VALIDATOR_TASK_DEFINITION}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": ${SUBNETS_JSON},
+            "SecurityGroups": ${SECURITY_GROUPS_JSON},
+            "AssignPublicIp": "ENABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "validator",
+              "Environment": [
+                { "Name": "INPUT_BUCKET", "Value.$": "$.bucket" },
+                { "Name": "INPUT_PREFIX", "Value.$": "$.prefix" },
+                { "Name": "EXECUTION_ID", "Value.$": "$$.Execution.Name" }
+              ]
+            }
+          ]
+        }
+      },
+      "Next": "RunTransformation",
+      "ResultPath": "$.validationResult",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyValidationFailure",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "RunTransformation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${TRANSFORMER_CLUSTER}",
+        "TaskDefinition": "${TRANSFORMER_TASK_DEFINITION}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": ${SUBNETS_JSON},
+            "SecurityGroups": ${SECURITY_GROUPS_JSON},
+            "AssignPublicIp": "ENABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "transformer",
+              "Environment": [
+                { "Name": "INPUT_BUCKET", "Value.$": "$.bucket" },
+                { "Name": "INPUT_PREFIX", "Value.$": "$.prefix" },
+                { "Name": "EXECUTION_ID", "Value.$": "$$.Execution.Name" }
+              ]
+            }
+          ]
+        }
+      },
+      "Next": "NotifyCompletion",
+      "ResultPath": "$.transformationResult",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyTransformationFailure",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "NotifyCompletion": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "BuildSuccessMessage",
+          "States": {
+            "BuildSuccessMessage": {
+              "Type": "Pass",
+              "Parameters": {
+                "snsSuccessMessage.$": "States.Format('Processing completed successfully. Bucket: {} Prefix: {} Files: {} Reason: {} Execution: {}', $.bucket, $.prefix, $.fileCount, $.triggerReason, $$.Execution.Name)"
+              },
+              "ResultPath": "$.notification",
+              "Next": "SendSuccessNotification"
+            },
+            "SendSuccessNotification": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${SNS_TOPIC_ARN}",
+                "Message.$": "$.notification.snsSuccessMessage",
+                "Subject": "Big Data Pipeline - Processing Complete"
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ClearProcessingState",
+          "States": {
+            "ClearProcessingState": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${CLEANUP_LAMBDA_NAME}",
+                "Payload": {
+                  "executionArn.$": "$$.Execution.Id",
+                  "status": "SUCCESS",
+                  "stepFunctionArn": "${STEP_FUNCTION_ARN}"
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "End": true
+    },
+
+    "NotifyValidationFailure": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "BuildValidationFailureMessage",
+          "States": {
+            "BuildValidationFailureMessage": {
+              "Type": "Pass",
+              "Parameters": {
+                "snsFailureMessage.$": "States.Format('Validation failed. Bucket: {} Prefix: {} Execution: {} Error: {}', $.bucket, $.prefix, $$.Execution.Name, $.error.Cause)"
+              },
+              "ResultPath": "$.notification",
+              "Next": "SendValidationFailureNotification"
+            },
+            "SendValidationFailureNotification": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${SNS_TOPIC_ARN}",
+                "Message.$": "$.notification.snsFailureMessage",
+                "Subject": "Big Data Pipeline - Validation Failed"
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ClearProcessingStateOnValidationFailure",
+          "States": {
+            "ClearProcessingStateOnValidationFailure": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${CLEANUP_LAMBDA_NAME}",
+                "Payload": {
+                  "executionArn.$": "$$.Execution.Id",
+                  "status": "VALIDATION_FAILED",
+                  "stepFunctionArn": "${STEP_FUNCTION_ARN}"
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "End": true
+    },
+
+    "NotifyTransformationFailure": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "BuildTransformationFailureMessage",
+          "States": {
+            "BuildTransformationFailureMessage": {
+              "Type": "Pass",
+              "Parameters": {
+                "snsFailureMessage.$": "States.Format('Transformation failed. Bucket: {} Prefix: {} Execution: {} Error: {}', $.bucket, $.prefix, $$.Execution.Name, $.error.Cause)"
+              },
+              "ResultPath": "$.notification",
+              "Next": "SendTransformationFailureNotification"
+            },
+            "SendTransformationFailureNotification": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${SNS_TOPIC_ARN}",
+                "Message.$": "$.notification.snsFailureMessage",
+                "Subject": "Big Data Pipeline - Transformation Failed"
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ClearProcessingStateOnTransformationFailure",
+          "States": {
+            "ClearProcessingStateOnTransformationFailure": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${CLEANUP_LAMBDA_NAME}",
+                "Payload": {
+                  "executionArn.$": "$$.Execution.Id",
+                  "status": "TRANSFORMATION_FAILED",
+                  "stepFunctionArn": "${STEP_FUNCTION_ARN}"
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "End": true
+    }
+  }
+}
