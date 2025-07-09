@@ -30,6 +30,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Print Step Function ARN
+        run: |
+          echo "Step Function ARN: $STEP_FUNCTION_ARN"
+
+
       - name: Substitute variables in state machine JSON
         run: |
           mkdir -p output
