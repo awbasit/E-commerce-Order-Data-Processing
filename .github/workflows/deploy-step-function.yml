@@ -30,7 +30,7 @@ jobs:
       - name: Substitute variables in state machine JSON
         run: |
           mkdir -p output
-          envsubst < infra/step_functions/state_machine.json > output/state_machine_rendered.json
+          envsubst < infra/step_function/state_machine.json > output/state_machine_rendered.json
 
       - name: Deploy Step Function
         run: |
