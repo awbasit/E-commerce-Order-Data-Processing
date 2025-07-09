@@ -30,10 +30,10 @@ jobs:
       - name: Substitute variables in state machine JSON
         run: |
           mkdir -p output
-          envsubst < infra/step_functions/state_machine_template.json > output/state_machine_rendered.json
+          envsubst < infra/step_functions/state_machine.json > output/state_machine_rendered.json
 
       - name: Deploy Step Function
         run: |
           aws stepfunctions update-state-machine \
             --state-machine-arn "$STEP_FUNCTION_ARN" \
-            --definition file://infra/step_function/state_machine.json
+            --definition file://output/state_machine_rendered.json
