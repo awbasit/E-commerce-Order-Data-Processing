@@ -1,0 +1,101 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Zip Cleanup Lambda function
+        run: |
+          cp infra/lambda_functions/CleanupLambda.py lambda_function.py
+          zip CleanupLambda.zip lambda_function.py
+
+      - name: Deploy Cleanup Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name CleanupLambda \
+            --zip-file fileb://CleanupLambda.zip
+
+      - name: Zip Data Analyzer Lambda function
+        run: |
+          cp infra/lambda_functions/data_size_analyzer.py lambda_function.py
+          zip data_size_analyzer.zip lambda_function.py
+
+      - name: Deploy Data Analyzer Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name data_size_analyzer \
+            --zip-file fileb://data_size_analyzer.zip
+
+      - name: Add IAM permissions for Lambda and Step Functions
+        run: |
+          aws iam put-role-policy \
+            --role-name StepFunctions-MyStateMachine-Project6-role-tifdqgq18 \
+            --policy-name StepFunctionLambdaInvokePolicy \
+            --policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": [
+                    "arn:aws:lambda:eu-north-1:025523568662:function:CleanupLambda",
+                    "arn:aws:lambda:eu-north-1:025523568662:function:data_size_analyzer"
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "states:StartExecution"
+                  ],
+                  "Resource": "arn:aws:states:eu-north-1:025523568662:stateMachine:StateMachine-Project6"
+                }
+              ]
+            }'
+
+      - name: Create EventBridge Rule for S3 Upload Trigger
+        run: |
+          aws events put-rule \
+            --name S3UploadTriggerRule \
+            --event-pattern '{
+              "source": ["aws.s3"],
+              "detail-type": ["Object Created"],
+              "detail": {
+                "bucket": {
+                  "name": ["project6dt"]
+                },
+                "object": {
+                  "key": [{
+                    "prefix": "raw_data/"
+                  }]
+                }
+              }
+            }' \
+            --state ENABLED
+
+      - name: Add Step Function as EventBridge Target
+        run: |
+          aws events put-targets \
+            --rule S3UploadTriggerRule \
+            --targets '[
+              {
+                "Id": "StepFunctionTarget",
+                "Arn": "arn:aws:states:eu-north-1:025523568662:stateMachine:StateMachine-Project6",
+                "RoleArn": "arn:aws:iam::025523568662:role/StepFunctions-MyStateMachine-Project6-role-tifdqgq18"
+              }
+            ]'
