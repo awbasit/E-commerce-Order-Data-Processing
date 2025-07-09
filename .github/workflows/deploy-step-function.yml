@@ -24,7 +24,7 @@ jobs:
       SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
       STEP_FUNCTION_ARN: ${{ secrets.STEP_FUNCTION_ARN }}
       SUBNETS_JSON: ${{ secrets.SUBNETS_JSON }}
-      SECURITY_GROUPS_JSON: ${{ secrets.SECURITY_GROUPS_JSON }}
+      SECURITY_GROUPS_IDS: ${{ secrets.SECURITY_GROUPS_IDS }}
 
     steps:
       - name: Checkout code
