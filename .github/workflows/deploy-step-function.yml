@@ -5,7 +5,7 @@ name: Deploy Step Function
 on:
   push:
     paths:
-      - 'infra/step_functions/**'
+      - 'infra/step_function/**'
       - '.github/workflows/deploy-step-function.yml'
 
 jobs:
