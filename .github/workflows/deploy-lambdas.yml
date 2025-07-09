@@ -1,0 +1,53 @@
+# .github/workflows/deploy-lambdas.yml
+
+name: Deploy Lambda Functions
+
+on:
+  push:
+    paths:
+      - 'infra/lambda_functions/**'
+      - '.github/workflows/deploy-lambdas.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      CLEANUP_LAMBDA_NAME: ${{ secrets.CLEANUP_LAMBDA_NAME }}
+      ANALYZER_LAMBDA_NAME: ${{ secrets.ANALYZER_LAMBDA_NAME }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # -------------------
+      # Deploy Cleanup Lambda
+      # -------------------
+      - name: Zip Cleanup Lambda
+        run: |
+          cp infra/lambda_functions/CleanupLambda/lambda_function.py lambda_function.py
+          zip CleanupLambda.zip lambda_function.py
+
+      - name: Update Cleanup Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "$CLEANUP_LAMBDA_NAME" \
+            --zip-file fileb://CleanupLambda.zip \
+            --region "$AWS_REGION"
+
+      # --------------------------
+      # Deploy Data Analyzer Lambda
+      # --------------------------
+      - name: Zip Data Analyzer Lambda
+        run: |
+          cp infra/lambda_functions/data_size_analyzer/lambda_function.py lambda_function.py
+          zip data_size_analyzer.zip lambda_function.py
+
+      - name: Update Data Analyzer Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "$ANALYZER_LAMBDA_NAME" \
+            --zip-file fileb://data_size_analyzer.zip \
+            --region "$AWS_REGION"

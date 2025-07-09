@@ -1,0 +1,39 @@
+# .github/workflows/deploy-step-function.yml
+
+name: Deploy Step Function
+
+on:
+  push:
+    paths:
+      - 'infra/step_functions/**'
+      - '.github/workflows/deploy-step-function.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      VALIDATOR_CLUSTER: ${{ secrets.VALIDATOR_CLUSTER }}
+      VALIDATOR_TASK_DEFINITION: ${{ secrets.VALIDATOR_TASK_DEFINITION }}
+      TRANSFORMER_CLUSTER: ${{ secrets.TRANSFORMER_CLUSTER }}
+      TRANSFORMER_TASK_DEFINITION: ${{ secrets.TRANSFORMER_TASK_DEFINITION }}
+      CLEANUP_LAMBDA_NAME: ${{ secrets.CLEANUP_LAMBDA_NAME }}
+      SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
+      STEP_FUNCTION_ARN: ${{ secrets.STEP_FUNCTION_ARN }}
+      SUBNETS_JSON: ${{ secrets.SUBNETS_JSON }}
+      SECURITY_GROUPS_JSON: ${{ secrets.SECURITY_GROUPS_JSON }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Substitute variables in state machine JSON
+        run: |
+          mkdir -p output
+          envsubst < infra/step_functions/state_machine_template.json > output/state_machine_rendered.json
+
+      - name: Deploy Step Function
+        run: |
+          aws stepfunctions update-state-machine \
+            --state-machine-arn "$STEP_FUNCTION_ARN" \
+            --definition file://infra/step_function/state_machine.json
