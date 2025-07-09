@@ -1,7 +1,7 @@
 
-# 📦 Big Data Pipeline Project – E-commerce Order Data Processing
+# Big Data Pipeline Project – E-commerce Order Data Processing
 
-## 🔍 Project Overview
+## Project Overview
 
 This project is a **serverless, event-driven data pipeline** designed to automate the **real-time processing of e-commerce order data** using AWS services. It ingests order-related CSV files from an S3 bucket, validates them, transforms the data into analytical format, and stores the output into a database or another structured storage system for insights and analytics.
 
@@ -9,9 +9,9 @@ The solution uses **AWS Step Functions**, **ECS Fargate**, **Lambda**, and **SNS
 
 ---
 
-## 📈 Business Purpose & Insights
+## Business Purpose & Insights
 
-### ❓ Why This Project Matters
+### Why This Project Matters
 
 - Modern e-commerce companies generate **thousands of transactions daily**.
 - Raw transactional data is **not analytics-ready** and needs structured transformation.
@@ -22,7 +22,7 @@ The solution uses **AWS Step Functions**, **ECS Fargate**, **Lambda**, and **SNS
   - Inventory movement
   - Order fulfillment patterns
 
-### 💡 Business Insights Delivered
+### Business Insights Delivered
 
 After processing, this pipeline can power dashboards and reports that provide:
 
@@ -33,21 +33,21 @@ After processing, this pipeline can power dashboards and reports that provide:
 
 ---
 
-## 🧠 Data Insights
+## Data Insights
 
-### 📁 Input Data (CSV files in S3)
+### Input Data (CSV files in S3)
 
 - `orders/`: Order transactions
 - `order_items/`: Product items in each order
 - `products/`: Product metadata
 
-### 📋 Sample Order Data
+### Sample Order Data
 
 | order_id | customer_id | order_date  | status     |
 |----------|-------------|-------------|------------|
 | 12345    | 456         | 2025-07-01  | completed  |
 
-### 📋 Sample Order Items
+### Sample Order Items
 
 | order_id | product_id | quantity | price  |
 |----------|------------|----------|--------|
@@ -55,7 +55,7 @@ After processing, this pipeline can power dashboards and reports that provide:
 
 ---
 
-## 🧾 Data Schema
+## Data Schema
 
 ### Orders Table
 - `order_id` (PK)
@@ -78,7 +78,7 @@ After processing, this pipeline can power dashboards and reports that provide:
 
 ---
 
-## 🔄 Data Transformations Implemented
+## Data Transformations Implemented
 
 - **Deduplication**: Remove duplicate records
 - **Type conversion**: Convert dates, floats, and integers appropriately
@@ -88,13 +88,13 @@ After processing, this pipeline can power dashboards and reports that provide:
 
 ---
 
-## 🧱 Entity Relationship Diagram (ERD)
+## Entity Relationship Diagram (ERD)
 
 Orders --< Order_Items >-- Products
 
 ---
 
-## 🔁 Project Workflow
+## Project Workflow
 
 1. **Files uploaded to S3** (triggered manually or via business app)
 2. **Step Function triggered** when file threshold is reached
@@ -110,13 +110,13 @@ Orders --< Order_Items >-- Products
 
 ---
 
-## 🏗️ Architecture Flow
+## Architecture Flow
 
 S3 -> Step Functions -> ECS (Validation & Transformation) -> SNS + Lambda Cleanup
 
 ---
 
-## ⚙️ Setup Instructions
+## Setup Instructions
 
 ### Prerequisites
 
@@ -161,7 +161,7 @@ docker push <ecr-url>
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```bash
 project/
@@ -174,6 +174,6 @@ project/
 
 ---
 
-## ✅ Summary
+## Summary
 
 This solution demonstrates a full-scale, cloud-native pipeline for processing structured e-commerce data at scale, suitable for further enhancement with ML or BI tools.
