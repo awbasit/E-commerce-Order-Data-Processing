@@ -30,18 +30,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Print Step Function ARN
-        run: |
-          echo "Step Function ARN: $STEP_FUNCTION_ARN"
-
-
       - name: Substitute variables in state machine JSON
         run: |
           mkdir -p output
           envsubst < infra/step_function/state_machine.json > output/state_machine_rendered.json
 
+      - name: Print rendered Step Function JSON
+        run: cat output/state_machine_rendered.json
+
+      - name: Validate rendered JSON
+        run: jq . output/state_machine_rendered.json
+
       - name: Deploy Step Function
         run: |
           aws stepfunctions update-state-machine \
             --state-machine-arn "$STEP_FUNCTION_ARN" \
-            --definition file://output/state_machine_rendered.json
+            --definition file://output/state_machine_rendered.json \
+            --region "$AWS_REGION"
