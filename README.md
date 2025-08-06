@@ -112,7 +112,7 @@ Orders --< Order_Items >-- Products
 
 ## Architecture Flow
 
-S3 -> Step Functions -> ECS (Validation & Transformation) -> SNS + Lambda Cleanup
+S3 -> Lambda Function -> Step Functions -> ECS (Validation & Transformation) -> SNS + Lambda Cleanup -> DynamoDB (Order KPIs & Category KPIs)
 
 ---
 
